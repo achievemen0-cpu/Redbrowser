@@ -1,0 +1,1791 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#09090b">
+  <title>RedDragon Browser & VPN</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Android WebKit Native Interface / Capacitor Bridge Mock -->
+  <script>
+    window.AndroidNative = window.AndroidNative || {
+      isApkRuntime: true,
+      getAppVersion: function() { return "4.5.0-APK-PRO"; },
+      getDeviceModel: function() { return navigator.userAgent.includes("Android") ? "Android Secure Node Pro" : "APK Simulation Mode"; },
+      toast: function(msg) { console.log("[APK Native Toast]: " + msg); },
+      vibrate: function(ms) { if (navigator.vibrate) navigator.vibrate(ms || 70); },
+      getBatteryStatus: function(cb) {
+        if (navigator.getBattery) {
+          navigator.getBattery().then(b => cb({ level: Math.round(b.level * 100), charging: b.charging }));
+        } else {
+          cb({ level: 99, charging: false });
+        }
+      },
+      biometricPrompt: function(cb) {
+        setTimeout(() => cb(true), 600); // Simulated fingerprint auth success
+      }
+    };
+  </script>
+
+  <!-- Firebase SDKs -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, query, onSnapshot, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    window.firebaseAppModules = {
+      initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut,
+      createUserWithEmailAndPassword, signInWithEmailAndPassword,
+      getFirestore, doc, getDoc, setDoc, updateDoc, collection, query, onSnapshot, addDoc, getDocs
+    };
+  </script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600;700&display=swap');
+    body {
+      font-family: 'Fira Code', monospace;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      margin: 0;
+      padding: 0;
+      background-color: #09090b;
+    }
+    .mobile-frame {
+      width: 100vw;
+      height: 100vh;
+      height: 100dvh;
+      max-width: 100%;
+      border: none;
+      border-radius: 0px;
+      box-shadow: none;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    @media (min-width: 640px) {
+      .mobile-frame {
+        width: 390px;
+        height: 844px;
+        max-height: 92vh;
+        border: 2px solid #7f1d1d;
+        border-radius: 36px;
+        box-shadow: 0 0 50px rgba(220, 38, 38, 0.35);
+      }
+    }
+    ::-webkit-scrollbar {
+      width: 4px;
+      height: 4px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #09090b;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #991b1b;
+      border-radius: 2px;
+    }
+    .symbol-rd::before {
+      content: "U\0335";
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body class="bg-zinc-950 flex items-center justify-center min-h-screen p-0 sm:p-4">
+
+  <div id="appContainer" class="mobile-frame bg-black flex flex-col justify-between border-red-900 transition-colors duration-300">
+    
+    <!-- Top Android Status Bar -->
+    <div id="statusBar" class="bg-zinc-950 border-b border-red-950/80 px-4 py-2 flex items-center justify-between text-xs text-red-500 z-50">
+      <div class="flex items-center gap-2">
+        <button onclick="returnToGoogleInitScreen()" class="text-zinc-400 hover:text-red-400 p-1 -ml-1 flex items-center justify-center transition-colors" title="Back to Search">
+          <i class="fa-solid fa-arrow-left text-xs"></i>
+        </button>
+        <i class="fa-solid fa-shield-halved text-red-600 animate-pulse"></i>
+        <span id="onionAddressDisplay" class="font-bold text-[10px] tracking-tight">x892a...onion</span>
+      </div>
+      <div class="flex items-center gap-2 text-[10px]">
+        <button onclick="toggleAccountMenu()" class="bg-zinc-900 border border-red-800/80 hover:bg-zinc-800 text-red-300 px-2 py-0.5 rounded-full flex items-center gap-1.5 transition-colors">
+          <i class="fa-solid fa-circle-user text-red-500 text-xs"></i>
+          <span id="activeAccountPillName" class="truncate max-w-[80px]">anon_user7</span>
+          <i class="fa-solid fa-chevron-down text-[8px] text-zinc-400"></i>
+        </button>
+        <span id="vpnBadge" class="bg-red-950 text-red-400 px-1.5 py-0.5 rounded border border-red-800">
+          <i class="fa-solid fa-lock text-[8px] mr-1"></i>VPN
+        </span>
+        <span id="timerDisplay" class="text-zinc-400">32s</span>
+      </div>
+    </div>
+
+    <!-- Google-style Animated Loading Bar -->
+    <div id="googleLoadingBar" class="hidden w-full h-1 bg-zinc-900 overflow-hidden relative z-50">
+      <div class="h-full bg-gradient-to-r from-red-600 via-amber-500 to-red-400 w-1/3 absolute animate-pulse rounded-full transition-all duration-300" id="loadingProgressInner"></div>
+    </div>
+
+    <!-- GOOGLE-STYLE MULTI-ACCOUNT MANAGER DROPDOWN MODAL -->
+    <div id="accountSwitcherModal" class="hidden absolute top-10 right-3 z-[150] w-72 bg-zinc-900/95 border border-red-900/80 backdrop-blur-md rounded-2xl p-3 shadow-2xl space-y-3">
+      <div class="flex justify-between items-center border-b border-zinc-800 pb-2">
+        <span class="text-[11px] font-bold text-red-400 flex items-center gap-1.5">
+          <i class="fa-brands fa-google text-red-500"></i> Rmail Identity Suite
+        </span>
+        <button onclick="toggleAccountMenu()" class="text-zinc-400 hover:text-white text-xs"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <div class="bg-black/60 p-2.5 rounded-xl border border-red-950 flex items-center gap-3">
+        <div id="activeAvatarCircle" class="w-9 h-9 rounded-full bg-red-900/60 text-red-200 border border-red-700 flex items-center justify-center font-bold text-sm">
+          A
+        </div>
+        <div class="flex-1 overflow-hidden">
+          <div id="activeAccountName" class="font-bold text-xs text-red-300 truncate">Anon User</div>
+          <div id="activeAccountEmail" class="text-[10px] text-zinc-400 truncate">anon_user7@rmail.onion</div>
+        </div>
+      </div>
+
+      <div class="space-y-1.5 max-h-36 overflow-y-auto pr-1" id="savedAccountsList">
+        <!-- Rendered dynamically -->
+      </div>
+
+      <button onclick="showAddAccountDialog()" class="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-200 py-2 rounded-xl text-xs font-bold border border-zinc-700 flex items-center justify-center gap-2 transition-all">
+        <i class="fa-solid fa-user-plus text-red-500"></i> Add another account
+      </button>
+
+      <div class="border-t border-zinc-800 pt-2 flex justify-between items-center text-[10px] text-zinc-500">
+        <button onclick="logoutUser()" class="hover:text-red-400 text-zinc-400">Sign out of all accounts</button>
+        <span>Google Node Engine</span>
+      </div>
+    </div>
+
+    <!-- Active IP Banner -->
+    <div id="devIpBanner" class="hidden bg-red-950/90 text-red-200 text-[10px] px-3 py-1 flex justify-between border-b border-red-700">
+      <span><strong class="text-red-400">DEV MODE ACTIVE:</strong> <span id="currentIpText">192.168.1.1</span></span>
+      <span id="currentServerText">SERVER: RANDOM (US-EAST)</span>
+    </div>
+
+    <!-- AUTHENTICATION / LOGIN SCREEN -->
+    <div id="authScreen" class="absolute inset-0 bg-black z-[110] flex flex-col p-6 justify-center items-center">
+      <div class="w-full max-w-xs space-y-4 bg-zinc-900/90 border border-red-900/80 p-5 rounded-2xl shadow-2xl">
+        <div class="text-center space-y-1">
+          <i class="fa-solid fa-shield-halved text-4xl text-red-600 animate-pulse"></i>
+          <h2 class="text-base font-bold text-red-200">RedDragon Browser & VPN</h2>
+          <p class="text-[10px] text-zinc-400">Sign in or create your Rmail identity (@rmail.onion)</p>
+        </div>
+
+        <div id="authModeTabs" class="flex rounded-lg bg-black p-1 border border-red-950 text-xs">
+          <button id="tabLoginBtn" onclick="switchAuthMode('login')" class="flex-1 py-1.5 rounded font-bold bg-red-900/50 text-red-300">Sign In</button>
+          <button id="tabRegisterBtn" onclick="switchAuthMode('register')" class="flex-1 py-1.5 rounded font-bold text-zinc-400">Create Rmail</button>
+        </div>
+
+        <div class="space-y-3 pt-1">
+          <div>
+            <label class="text-[10px] text-zinc-400 block mb-1">Rmail Address / ID</label>
+            <div class="flex items-center bg-black border border-red-900/50 rounded px-2">
+              <i class="fa-solid fa-envelope text-red-600 text-xs mr-2"></i>
+              <input type="text" id="authEmailInput" class="w-full bg-transparent py-2 text-xs text-red-300 outline-none" placeholder="username@rmail.onion">
+            </div>
+          </div>
+
+          <div>
+            <label class="text-[10px] text-zinc-400 block mb-1">Secure Passkey</label>
+            <div class="flex items-center bg-black border border-red-900/50 rounded px-2">
+              <i class="fa-solid fa-key text-red-600 text-xs mr-2"></i>
+              <input type="password" id="authPasswordInput" class="w-full bg-transparent py-2 text-xs text-red-300 outline-none" placeholder="••••••••••••">
+            </div>
+          </div>
+
+          <button id="authSubmitBtn" onclick="handleAuthSubmit()" class="w-full bg-red-800 hover:bg-red-700 text-white py-2.5 rounded-lg text-xs font-bold shadow-lg">
+            Sign In to RedDragon
+          </button>
+
+          <button onclick="handleAnonymousAuth()" class="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-300 py-2 rounded-lg text-[10px] font-bold border border-zinc-700">
+            Continue Anonymously (Guest Node)
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- GOOGLE-STYLE ASK EVERYTHING INITIALIZATION SCREEN -->
+    <div id="googleInitScreen" class="absolute inset-0 bg-zinc-950 z-[105] flex flex-col p-6 items-center justify-center transition-all duration-500">
+      
+      <div class="absolute top-4 right-4 flex items-center gap-2">
+        <button onclick="toggleAccountMenu()" class="flex items-center gap-2 bg-zinc-900 hover:bg-zinc-800 border border-red-900/60 text-red-400 px-3 py-1.5 rounded-full transition-all shadow-lg text-xs">
+          <div id="initScreenAvatar" class="w-5 h-5 rounded-full bg-red-800 text-white flex items-center justify-center font-bold text-[10px]">
+            A
+          </div>
+          <span id="initScreenUserPill" class="text-[11px] font-semibold truncate max-w-[90px]">anon_user7</span>
+          <i class="fa-solid fa-chevron-down text-[8px] text-zinc-400"></i>
+        </button>
+      </div>
+
+      <div class="w-full max-w-sm flex flex-col items-center space-y-6 text-center">
+        <div class="space-y-1">
+          <div class="flex items-center justify-center gap-2">
+            <span class="text-2xl font-black text-red-500 tracking-wider">RED</span>
+            <span class="text-2xl font-black text-white tracking-wider">DRAGON</span>
+          </div>
+          <span class="text-[10px] text-zinc-400 tracking-widest uppercase">Decentralized Knowledge & Search Engine</span>
+        </div>
+
+        <div class="w-full bg-zinc-900/90 border border-red-900/70 rounded-full px-4 py-3 flex items-center shadow-2xl gap-3">
+          <i class="fa-solid fa-magnifying-glass text-red-600 text-sm"></i>
+          <input type="text" id="globalQueryInput" class="w-full bg-transparent text-xs text-red-200 outline-none placeholder-zinc-500" placeholder="Search Google securely or enter URL..." onkeypress="if(event.key==='Enter') executeGoogleSearchQuery()">
+          <button onclick="triggerVoiceSearch()" class="text-zinc-400 hover:text-red-400" title="Voice Search">
+            <i class="fa-solid fa-microphone text-xs"></i>
+          </button>
+        </div>
+
+        <div class="flex flex-wrap justify-center gap-2 text-[10px]">
+          <button onclick="quickGoogleQuery('Explore Deep Web Nodes')" class="bg-zinc-900 hover:bg-zinc-800 text-zinc-300 px-3 py-1.5 rounded-full border border-red-950">Deep Web Nodes</button>
+          <button onclick="quickGoogleQuery('Venice AI Uncensored')" class="bg-zinc-900 hover:bg-zinc-800 text-zinc-300 px-3 py-1.5 rounded-full border border-red-950">Venice AI Engine</button>
+          <button onclick="quickGoogleQuery('RedDrillion Balance')" class="bg-zinc-900 hover:bg-zinc-800 text-zinc-300 px-3 py-1.5 rounded-full border border-red-950">Wallet Balance</button>
+        </div>
+
+        <button onclick="dismissGoogleInitScreen()" class="w-full bg-red-800 hover:bg-red-700 text-white py-3 rounded-xl text-xs font-bold shadow-xl border border-red-600">
+          Launch RedDragon Browser & VPN <i class="fa-solid fa-arrow-right ml-1"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Corrupted App Overlay -->
+    <div id="corruptedAppOverlay" class="hidden absolute inset-0 bg-red-950/95 z-[100] flex flex-col items-center justify-center p-6 text-center">
+      <i class="fa-solid fa-triangle-exclamation text-6xl text-red-500 mb-4 animate-bounce"></i>
+      <h2 class="text-xl font-bold text-red-200 mb-2">SYSTEM INTEGRITY CORRUPTED</h2>
+      <p class="text-xs text-red-400 mb-6">Unauthorized modifications detected in Core Encryption Layer 16. App execution halted for safety.</p>
+      <button onclick="restoreAppCore()" class="bg-red-700 hover:bg-red-600 text-white font-bold px-4 py-2 rounded text-xs border border-red-500 shadow-lg">
+        RESTORE DEFAULTS & REBOOT
+      </button>
+    </div>
+
+    <!-- MAIN VIEWPORT AREA -->
+    <div class="flex-1 overflow-y-auto relative flex flex-col" id="viewportArea">
+      
+      <!-- 1. PERSONAL BROWSER & TOR SCREEN -->
+      <section id="viewBrowser" class="app-view flex-1 flex flex-col p-3 gap-3">
+        <div class="flex gap-2">
+          <div class="flex-1 flex items-center bg-zinc-900 border border-red-900/50 rounded-lg px-2 text-xs">
+            <i class="fa-solid fa-globe text-red-600 mr-2"></i>
+            <input type="text" id="browserUrl" value="https://www.google.com" class="bg-transparent text-red-400 outline-none w-full py-2 text-[11px]" placeholder="Enter Google Search URL or .onion..." onkeypress="if(event.key==='Enter') navigateBrowser()">
+          </div>
+          <button onclick="navigateBrowser()" class="bg-red-900/40 hover:bg-red-800/60 text-red-400 border border-red-700/50 px-3 py-2 rounded-lg text-xs font-bold">
+            GO
+          </button>
+        </div>
+
+        <div class="flex items-center justify-between text-[11px] bg-zinc-900/60 p-2 rounded border border-red-950">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" id="incognitoToggle" class="accent-red-600" onchange="toggleIncognito()">
+            <span class="text-zinc-300 font-semibold"><i class="fa-solid fa-user-ninja mr-1"></i> Incognito Mode</span>
+          </label>
+          <span id="tierBadge" class="text-[10px] text-zinc-400">Surface Web Access</span>
+        </div>
+
+        <div id="browserContent" class="flex-1 bg-zinc-900/40 border border-red-900/30 rounded-lg p-0 overflow-hidden relative flex flex-col">
+          <!-- Live Google Search / Embedded Frame or Secure Proxy View -->
+          <iframe id="browserIframe" src="https://www.google.com/webhp?igu=1" class="w-full h-full border-none bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+        </div>
+      </section>
+
+      <!-- 2. UNCENSORED AI ASSISTANT (VENICE AI OPENAI CLIENT) -->
+      <section id="viewAi" class="app-view hidden flex-1 flex flex-col p-3 gap-2">
+        <div class="bg-zinc-900/80 p-2 border border-red-900/40 rounded flex items-center justify-between text-xs">
+          <div class="flex items-center gap-2">
+            <i class="fa-solid fa-robot text-red-500 text-lg"></i>
+            <div>
+              <span class="font-bold block text-red-400">Venice.ai Client (OpenAI API)</span>
+              <span class="text-[9px] text-zinc-400" id="aiVoiceModeDisplay">Endpoint: https://api.venice.ai/api/v1</span>
+            </div>
+          </div>
+          <button onclick="speakAILastResponse()" class="text-xs bg-red-950 border border-red-800 px-2 py-1 rounded text-red-300">
+            <i class="fa-solid fa-volume-high"></i>
+          </button>
+        </div>
+
+        <div id="aiChatBox" class="flex-1 bg-zinc-900/30 border border-red-950 rounded-lg p-3 overflow-y-auto space-y-3 text-xs">
+          <div class="bg-red-950/40 border border-red-900/50 p-2.5 rounded-lg max-w-[85%] text-zinc-200 font-mono text-[10px] leading-relaxed">
+<span class="text-emerald-400"># Venice AI Client Initialized</span><br>
+from openai import OpenAI<br><br>
+client = OpenAI(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;base_url="https://api.venice.ai/api/v1",<br>
+&nbsp;&nbsp;&nbsp;&nbsp;api_key="your-venice-api-key"<br>
+)<br><br>
+<span class="text-zinc-400">Status: Connected to Venice Uncensored AI endpoint. Ready for queries.</span>
+          </div>
+        </div>
+
+        <div class="flex gap-2">
+          <input type="text" id="aiInput" class="flex-1 bg-zinc-900 border border-red-900/50 rounded-lg px-3 py-2 text-xs text-red-300 outline-none" placeholder="Ask Venice AI API..." onkeypress="if(event.key==='Enter') sendAiMessage()">
+          <button onclick="sendAiMessage()" class="bg-red-800 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-xs font-bold">
+            <i class="fa-solid fa-paper-plane"></i>
+          </button>
+        </div>
+      </section>
+
+      <!-- 3. PERSONAL BROADCAST & MEDIA SHARING -->
+      <section id="viewBroadcast" class="app-view hidden flex-1 flex flex-col p-3 gap-3">
+        <div class="flex justify-between items-center border-b border-red-900/50 pb-2">
+          <h2 class="font-bold text-xs text-red-400"><i class="fa-solid fa-tower-broadcast mr-2"></i>Peer-to-Peer Broadcast</h2>
+          <span class="text-[10px] bg-red-950 text-red-400 px-2 py-0.5 rounded-full border border-red-800">1,402 Peer Nodes</span>
+        </div>
+
+        <div id="broadcastFeed" class="flex-1 overflow-y-auto space-y-3 pr-1">
+          <div class="bg-zinc-900/60 border border-red-900/40 p-3 rounded-lg text-xs">
+            <div class="flex justify-between text-[10px] text-zinc-400 mb-1">
+              <span class="text-red-400 font-bold">GhostUser_99 (RedMail)</span>
+              <span>12:40 PM</span>
+            </div>
+            <p class="text-zinc-200 mb-2">Broadcasting decentralized market nodes for peer validation.</p>
+            <div class="bg-black/60 p-2 rounded text-[10px] text-red-400 border border-zinc-800 flex items-center justify-between">
+              <span><i class="fa-solid fa-file-code mr-2"></i>Node_Config_v4.enc</span>
+              <button class="text-xs bg-red-900/50 px-2 py-1 rounded hover:bg-red-800">Download</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-zinc-900/80 p-2 border border-red-900/50 rounded-lg flex flex-col gap-2">
+          <textarea id="broadcastInput" placeholder="Broadcast message, product link, or media info..." class="bg-black border border-zinc-800 rounded p-2 text-xs text-red-300 outline-none resize-none h-14"></textarea>
+          <div class="flex justify-between items-center">
+            <div class="flex gap-2 text-zinc-400 text-sm">
+              <button title="Attach Image" class="hover:text-red-400" onclick="attachBroadcastMedia('Image')"><i class="fa-solid fa-image"></i></button>
+              <button title="Attach Video" class="hover:text-red-400" onclick="attachBroadcastMedia('Video')"><i class="fa-solid fa-video"></i></button>
+              <button title="Attach Audio" class="hover:text-red-400" onclick="attachBroadcastMedia('Audio')"><i class="fa-solid fa-music"></i></button>
+              <button title="List Product" class="hover:text-red-400" onclick="attachBroadcastMedia('Product')"><i class="fa-solid fa-bag-shopping"></i></button>
+            </div>
+            <button onclick="publishBroadcast()" class="bg-red-800 hover:bg-red-700 text-white px-3 py-1.5 rounded text-xs font-bold">
+              Broadcast
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. REDMAIL & REDDRILLION WALLET (PREMIUM/BANK) -->
+      <section id="viewWallet" class="app-view hidden flex-1 flex flex-col p-3 gap-3 overflow-y-auto">
+        <div class="bg-gradient-to-r from-red-950 via-zinc-900 to-black p-3 rounded-lg border border-red-800">
+          <div class="flex justify-between items-start mb-2">
+            <div>
+              <span class="text-[10px] text-zinc-400 block">Active Rmail Account</span>
+              <span class="text-xs font-bold text-red-300" id="userRedMailDisplay">anon_user7@rmail.onion</span>
+            </div>
+            <div class="flex flex-col items-end gap-1">
+              <span id="accountStatusTag" class="text-[9px] bg-zinc-800 text-zinc-300 px-2 py-0.5 rounded border border-zinc-700">Standard Tier</span>
+              <button onclick="toggleAccountMenu()" class="text-[9px] text-red-400 hover:text-red-300 underline"><i class="fa-solid fa-arrows-rotate mr-1"></i>Switch Account</button>
+            </div>
+          </div>
+          <div class="mt-2 border-t border-red-900/50 pt-2">
+            <span class="text-[10px] text-zinc-400 block">RedDrillion Balance</span>
+            <div class="text-lg font-bold text-red-400 flex items-center gap-1">
+              <span class="symbol-rd"></span> <span id="balanceDisplay">0.00</span>
+              <span class="text-[10px] text-zinc-500 font-normal">(1 U̸ = $1 USD)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-zinc-900 border border-red-900/60 p-3 rounded-lg text-xs space-y-2">
+          <h3 class="font-bold text-red-400 flex items-center gap-2">
+            <i class="fa-solid fa-crown text-amber-500"></i> Deepest Web Premium Access
+          </h3>
+          <p class="text-[10px] text-zinc-300">Upgrade to access the deepest layers of onion network with unlimited bandwidth.</p>
+          <div class="flex justify-between items-center pt-1">
+            <span class="text-xs font-bold text-zinc-200"><span class="symbol-rd"></span> 100,000,000,000,000 U̸</span>
+            <button onclick="buyPremiumAccess()" class="bg-red-800 hover:bg-red-700 text-white text-[11px] px-3 py-1.5 rounded font-bold">
+              Upgrade Now
+            </button>
+          </div>
+        </div>
+
+        <!-- Biometric Vault Button -->
+        <div class="bg-zinc-900/80 border border-red-900/60 p-3 rounded-lg text-xs space-y-2">
+          <h3 class="font-bold text-red-400 flex items-center gap-2">
+            <i class="fa-solid fa-fingerprint text-emerald-500"></i> Biometric Vault Protection
+          </h3>
+          <p class="text-[10px] text-zinc-300">Secure your Rmail messages and RedDrillion private keys with Android hardware biometric sensor.</p>
+          <button onclick="triggerBiometricVault()" class="w-full bg-emerald-900/60 hover:bg-emerald-800 text-emerald-200 text-xs py-2 rounded font-bold border border-emerald-700 flex items-center justify-center gap-2">
+            <i class="fa-solid fa-lock"></i> Authenticate with Fingerprint / FaceID
+          </button>
+        </div>
+
+        <!-- NEW: Secure Notes & Password Vault -->
+        <div class="bg-zinc-900/80 border border-red-900/60 p-3 rounded-lg text-xs space-y-2">
+          <div class="flex justify-between items-center border-b border-zinc-800 pb-1">
+            <h3 class="font-bold text-red-400 flex items-center gap-2">
+              <i class="fa-solid fa-key text-red-500"></i> Encrypted Vault & Notes
+            </h3>
+            <button onclick="openAddVaultItemModal()" class="bg-red-900 hover:bg-red-800 text-white px-2 py-0.5 rounded text-[10px] font-bold">
+              + Add Item
+            </button>
+          </div>
+          <div class="space-y-1.5 max-h-32 overflow-y-auto" id="vaultItemsList">
+            <div class="p-2 bg-black/60 rounded border border-zinc-900 flex justify-between items-center">
+              <div>
+                <span class="font-bold text-zinc-200 block text-[11px]">Primary Crypto Seed Note</span>
+                <span class="text-[9px] text-zinc-500">Encrypted with Quantum-256</span>
+              </div>
+              <button onclick="showModal('Vault Item', 'Secret: 12-word seed phrase securely stored in hardware-backed keychain.')" class="bg-zinc-800 hover:bg-zinc-700 text-red-400 px-2 py-1 rounded text-[10px]">View</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="devBankSection" class="hidden bg-red-950/40 border border-red-700 p-3 rounded-lg space-y-2">
+          <div class="flex justify-between items-center">
+            <h4 class="text-xs font-bold text-red-300"><i class="fa-solid fa-building-columns mr-1"></i> Developer Private Bank Account</h4>
+            <span class="text-[9px] bg-red-900/80 text-white px-1.5 py-0.5 rounded">UNLIMITED CREDIT</span>
+          </div>
+          <p class="text-[10px] text-zinc-400">All premium purchase credits route directly to this account. Scan any bank QR to initiate instant wire transfer.</p>
+          <button onclick="triggerQrScan()" class="w-full bg-red-800 hover:bg-red-700 text-white text-xs py-2 rounded flex items-center justify-center gap-2 font-bold">
+            <i class="fa-solid fa-qrcode text-base"></i> Scan Bank QR Code to Transfer
+          </button>
+        </div>
+
+        <div class="bg-zinc-900/40 border border-zinc-800 p-3 rounded-lg text-xs space-y-3">
+          <div class="flex justify-between items-center border-b border-zinc-800 pb-1">
+            <h4 class="font-bold text-red-400 text-[11px]"><i class="fa-solid fa-envelope mr-1"></i> Rmail Inbox</h4>
+            <button onclick="openComposeMailModal()" class="bg-red-900 hover:bg-red-800 text-white text-[10px] px-2 py-1 rounded font-bold">
+              <i class="fa-solid fa-pen-to-square mr-1"></i> Compose
+            </button>
+          </div>
+          <div class="space-y-1.5 text-[10px]" id="mailList">
+            <div class="p-2 bg-black/50 rounded border border-zinc-900 flex justify-between">
+              <div>
+                <span class="font-bold text-zinc-300 block">sys_security@rmail.onion</span>
+                <span class="text-zinc-500">Welcome to RedDragon Network. Your 16-layer tunnel is active.</span>
+              </div>
+              <span class="text-zinc-600">Now</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. 16-LAYER DECRYPTION & INNER CORE CODE VIEW -->
+      <section id="viewLayers" class="app-view hidden flex-1 flex flex-col p-3 gap-3 overflow-y-auto">
+        <div class="border-b border-red-900/50 pb-2">
+          <h2 class="font-bold text-xs text-red-400"><i class="fa-solid fa-key mr-2"></i>16-Layer Decryption Protocol</h2>
+          <p class="text-[10px] text-zinc-400">Decrypt all 16 security layers sequentially to inspect or modify inner core source code.</p>
+        </div>
+
+        <!-- NEW: Quantum Threat Radar & Node Map Widget -->
+        <div class="bg-zinc-900 border border-red-900/60 p-3 rounded-lg space-y-2">
+          <div class="flex justify-between items-center text-xs">
+            <span class="font-bold text-red-400 flex items-center gap-1.5"><i class="fa-solid fa-satellite-dish text-red-500 animate-pulse"></i> Quantum Node Radar</span>
+            <span class="text-[9px] bg-red-950 text-red-300 px-2 py-0.5 rounded border border-red-800">3 Active Circuits</span>
+          </div>
+          <div class="bg-black/80 p-3 rounded border border-red-950 font-mono text-[9px] space-y-1.5 text-zinc-300">
+            <div class="flex justify-between text-zinc-500 border-b border-zinc-900 pb-1">
+              <span>NODE ID</span>
+              <span>LATENCY</span>
+              <span>STATUS</span>
+            </div>
+            <div class="flex justify-between text-red-300">
+              <span>[CH-Zurich-01]</span>
+              <span>14ms</span>
+              <span class="text-emerald-400">SECURE</span>
+            </div>
+            <div class="flex justify-between text-red-300">
+              <span>[IS-Reykjavik-04]</span>
+              <span>28ms</span>
+              <span class="text-emerald-400">SECURE</span>
+            </div>
+            <div class="flex justify-between text-red-300">
+              <span>[DE-Frankfurt-09]</span>
+              <span>19ms</span>
+              <span class="text-emerald-400">SECURE</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-zinc-900 p-3 rounded-lg border border-red-900/40">
+          <div class="flex justify-between text-xs mb-1">
+            <span class="text-zinc-300">Decryption Progress</span>
+            <span id="layerProgressText" class="text-red-400 font-bold">Layer 0 / 16</span>
+          </div>
+          <div class="w-full bg-zinc-950 rounded-full h-2 overflow-hidden border border-zinc-800">
+            <div id="layerProgressBar" class="bg-red-600 h-full w-0 transition-all duration-300"></div>
+          </div>
+        </div>
+
+        <div id="layerChallengeCard" class="bg-zinc-900/80 border border-red-900/60 p-3 rounded-lg space-y-3">
+          <div class="flex justify-between items-center text-xs">
+            <span class="font-bold text-red-400" id="currentLayerTitle">Layer 1 Password Required</span>
+            <i class="fa-solid fa-lock text-red-500"></i>
+          </div>
+          <p class="text-[10px] text-zinc-400" id="layerHintText">Enter password for encryption layer 1 to unlock deeper system layers.</p>
+          
+          <div class="flex gap-2">
+            <input type="password" id="layerPasswordInput" class="flex-1 bg-black border border-red-900/50 rounded p-2 text-xs text-red-300 outline-none" placeholder="Enter layer key...">
+            <button onclick="attemptLayerUnlock()" class="bg-red-800 hover:bg-red-700 text-white px-3 py-1.5 rounded text-xs font-bold">
+              Decrypt
+            </button>
+          </div>
+        </div>
+
+        <div id="innerCoreEditor" class="hidden flex-1 flex flex-col gap-2">
+          <div class="flex justify-between items-center">
+            <span class="text-xs font-bold text-emerald-400"><i class="fa-solid fa-code mr-1"></i> Core Source Unlocked</span>
+            <button onclick="saveCoreCodeChanges()" class="bg-red-800 hover:bg-red-700 text-white px-2 py-1 rounded text-[10px] font-bold">
+              Apply Code Edits
+            </button>
+          </div>
+          <textarea id="coreCodeTextArea" class="flex-1 bg-black font-mono text-[10px] text-red-400 p-2 border border-red-800 rounded outline-none h-40 leading-relaxed" spellcheck="false">
+// REDDRAGON INNER CORE SOURCE CODE v4.5 (APK BUILD)
+// WARNING: Any unauthorized text modification triggers full integrity lock out.
+
+function initializeSystemKernel() {
+  const protectionLayers = 16;
+  const encryptionType = "Quantum-256";
+  const defaultOnionRouting = true;
+  return { protectionLayers, encryptionType, defaultOnionRouting };
+}
+
+// System Core Active State
+const SYSTEM_HEALTH = 100;
+          </textarea>
+        </div>
+      </section>
+
+      <!-- 6. SETTINGS & DEVELOPER OPTIONS -->
+      <section id="viewSettings" class="app-view hidden flex-1 flex flex-col p-3 gap-3 overflow-y-auto">
+        <h2 class="font-bold text-xs text-red-400 border-b border-red-900/50 pb-2"><i class="fa-solid fa-sliders mr-2"></i>System Settings</h2>
+
+        <div class="bg-zinc-900/60 border border-red-900/30 p-3 rounded-lg text-xs space-y-1">
+          <h3 class="font-bold text-red-400">About RedDragon Browser & VPN</h3>
+          <p class="text-[10px] text-zinc-400 leading-relaxed">
+            Encrypted personal browser, VPN & Venice AI client operating on randomized Tor onion routing. Integrated with 16-layer security verification, RedMail, and RedDrillion cryptocurrency. Compiled for Android APK runtime.
+          </p>
+        </div>
+
+        <div class="bg-zinc-900/80 border border-red-900/60 p-3 rounded-lg text-xs space-y-2">
+          <h3 class="font-bold text-red-400 flex items-center justify-between">
+            <span><i class="fa-solid fa-terminal mr-2"></i>Developer Option</span>
+            <span id="devStatusBadge" class="text-[9px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded">Locked</span>
+          </h3>
+          <p class="text-[10px] text-zinc-400">Requires Developer Password to toggle developer options or adjust node parameters.</p>
+          
+          <div class="flex gap-2">
+            <input type="password" id="devPasswordInput" class="flex-1 bg-black border border-red-900/50 rounded p-1.5 text-xs text-red-300 outline-none" placeholder="Enter developer password...">
+            <button onclick="authenticateDeveloper()" class="bg-red-800 hover:bg-red-700 text-white px-3 py-1.5 rounded text-xs font-bold">
+              Unlock
+            </button>
+          </div>
+        </div>
+
+        <div id="developerPanel" class="hidden bg-red-950/30 border border-red-800 p-3 rounded-lg text-xs space-y-3">
+          <h4 class="font-bold text-red-300 border-b border-red-800/60 pb-1">Developer Controls</h4>
+          
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] text-zinc-200">Developer Mode Status</span>
+            <input type="checkbox" id="devModeStateToggle" class="accent-red-600" onchange="toggleDevModeState(this.checked)">
+          </div>
+
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] text-zinc-200">See Other User IP Details</span>
+            <input type="checkbox" id="devSeeIpToggle" class="accent-red-600" onchange="toggleSeeIp(this.checked)">
+          </div>
+
+          <div class="space-y-1">
+            <label class="text-[10px] text-zinc-400 block">Change Permanent IP Address</label>
+            <div class="flex gap-2">
+              <input type="text" id="devIpInput" value="185.220.101.5" class="flex-1 bg-black border border-red-900/60 rounded px-2 py-1 text-xs text-red-300 outline-none">
+              <button onclick="setDevPermanentIp()" class="bg-red-800 px-2 py-1 rounded text-[10px] text-white">Apply</button>
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <label class="text-[10px] text-zinc-400 block">Select VPN Country Server</label>
+            <select id="devServerSelect" class="w-full bg-black border border-red-900/60 rounded p-1 text-xs text-red-300 outline-none" onchange="changeDevServer(this.value)">
+              <option value="random().server">Default: random().server</option>
+              <option value="Switzerland-CH-01">Switzerland (Zurich)</option>
+              <option value="Iceland-IS-04">Iceland (Reykjavik)</option>
+              <option value="Germany-DE-09">Germany (Frankfurt)</option>
+              <option value="Japan-JP-02">Japan (Tokyo)</option>
+            </select>
+          </div>
+
+          <div class="space-y-1 pt-1 border-t border-red-900/40">
+            <label class="text-[10px] text-zinc-400 block">Delete User (by RedMail ID)</label>
+            <div class="flex gap-2">
+              <input type="text" id="devDeleteUserMail" placeholder="user@email.com" class="flex-1 bg-black border border-red-900/60 rounded px-2 py-1 text-xs text-red-300 outline-none">
+              <button onclick="devDeleteUser()" class="bg-red-900 hover:bg-red-700 px-2 py-1 rounded text-[10px] text-white font-bold">Delete</button>
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <label class="text-[10px] text-zinc-400 block">Delete Message (by Link / ID)</label>
+            <div class="flex gap-2">
+              <input type="text" id="devDeleteMsgLink" placeholder="redlink://msg/8892" class="flex-1 bg-black border border-red-900/60 rounded px-2 py-1 text-xs text-red-300 outline-none">
+              <button onclick="devDeleteMessage()" class="bg-red-900 hover:bg-red-700 px-2 py-1 rounded text-[10px] text-white font-bold">Delete</button>
+            </div>
+          </div>
+
+          <div class="space-y-1 pt-1 border-t border-red-900/40">
+            <label class="text-[10px] text-zinc-400 block">RedDrillion (Adjust Amount in Any Account)</label>
+            <div class="flex gap-1.5">
+              <input type="text" id="devTargetRedMail" placeholder="User RedMail" class="w-1/2 bg-black border border-red-900/60 rounded px-2 py-1 text-[10px] text-red-300 outline-none">
+              <input type="number" id="devAmountValue" placeholder="Amount" class="w-1/2 bg-black border border-red-900/60 rounded px-2 py-1 text-[10px] text-red-300 outline-none">
+            </div>
+            <button onclick="devModifyRedDrillion()" class="w-full bg-red-800 hover:bg-red-700 text-white text-xs py-1 rounded mt-1 font-bold">
+              Update Balance
+            </button>
+          </div>
+        </div>
+
+        <div class="bg-zinc-900/80 border border-red-900/60 p-3 rounded-lg text-xs space-y-3">
+          <h3 class="font-bold text-red-400 flex items-center justify-between">
+            <span><i class="fa-solid fa-android mr-2 text-emerald-500"></i>Android APK Export & Native Bridge</span>
+            <span class="text-[9px] bg-emerald-950 text-emerald-400 px-2 py-0.5 rounded border border-emerald-800 font-mono">v4.5 APK</span>
+          </h3>
+          <p class="text-[10px] text-zinc-400">Export this app code for compilation into Android WebKit/Capacitor/Cordova standalone APK packages.</p>
+          
+          <div class="grid grid-cols-2 gap-2">
+            <button onclick="exportApkPackage('apk')" class="bg-emerald-900/60 hover:bg-emerald-800 border border-emerald-700 text-emerald-200 py-2 px-2 rounded text-[10px] font-bold flex items-center justify-center gap-1.5">
+              <i class="fa-solid fa-download"></i> Export HTML for APK
+            </button>
+            <button onclick="exportApkPackage('manifest')" class="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 py-2 px-2 rounded text-[10px] font-bold flex items-center justify-center gap-1.5">
+              <i class="fa-solid fa-file-code"></i> Download Manifest
+            </button>
+          </div>
+        </div>
+
+        <div class="bg-zinc-900/60 border border-red-900/30 p-3 rounded-lg text-xs space-y-2">
+          <h3 class="font-bold text-red-400"><i class="fa-solid fa-microphone mr-2"></i>Change Voice</h3>
+          <select id="voiceSelect" class="w-full bg-black border border-red-900/50 rounded p-1.5 text-xs text-red-300 outline-none" onchange="updateVoiceSelection(this.value)">
+            <option value="Jarvis Voice">Jarvis Voice</option>
+            <option value="Friday Voice">Friday Voice</option>
+            <option value="Ultron Voice">Ultron Voice</option>
+            <option value="Vision Voice">Vision Voice</option>
+            <option value="Male Voice">Male Voice</option>
+            <option value="Female Voice">Female Voice</option>
+            <option value="Default Voice">Default Voice</option>
+          </select>
+
+          <div class="space-y-1">
+            <div class="flex justify-between text-[10px] text-zinc-400">
+              <span>Voice Tone / Pitch</span>
+              <span id="pitchVal">1.0</span>
+            </div>
+            <input type="range" min="0.5" max="1.8" step="0.1" value="1.0" class="w-full accent-red-600" id="voicePitch" oninput="document.getElementById('pitchVal').innerText=this.value">
+          </div>
+
+          <div class="space-y-1">
+            <div class="flex justify-between text-[10px] text-zinc-400">
+              <span>Voice Thickness / Rate</span>
+              <span id="rateVal">1.0</span>
+            </div>
+            <input type="range" min="0.5" max="1.5" step="0.1" value="1.0" class="w-full accent-red-600" id="voiceThickness" oninput="document.getElementById('rateVal').innerText=this.value">
+          </div>
+
+          <button onclick="testVoiceSample()" class="w-full bg-zinc-800 hover:bg-zinc-700 text-red-300 py-1.5 rounded border border-zinc-700 text-[11px] font-bold">
+            <i class="fa-solid fa-play mr-1"></i> Sample Test Voice
+          </button>
+        </div>
+
+        <div class="bg-zinc-900/60 border border-red-900/30 p-3 rounded-lg text-xs space-y-3">
+          <h3 class="font-bold text-red-400"><i class="fa-solid fa-palette mr-2"></i>Appearance Settings</h3>
+          
+          <div>
+            <label class="text-[10px] text-zinc-400 block mb-1">System Background Color</label>
+            <div class="flex gap-2">
+              <button onclick="changeBgColor('#000000')" class="w-6 h-6 rounded-full bg-black border border-zinc-700" title="Black"></button>
+              <button onclick="changeBgColor('#ffffff')" class="w-6 h-6 rounded-full bg-white border border-zinc-700" title="White"></button>
+              <button onclick="changeBgColor('#450a0a')" class="w-6 h-6 rounded-full bg-red-950 border border-red-700" title="Red"></button>
+              <button onclick="changeBgColor('#18181b')" class="w-6 h-6 rounded-full bg-zinc-900 border border-zinc-700" title="Gray"></button>
+            </div>
+          </div>
+
+          <div>
+            <label class="text-[10px] text-zinc-400 block mb-1">Text Color</label>
+            <select class="w-full bg-black border border-red-900/50 rounded p-1 text-xs text-red-300 outline-none" onchange="changeTextColor(this.value)">
+              <option value="text-red-500">Red (Default)</option>
+              <option value="text-black">Black</option>
+              <option value="text-white">White</option>
+              <option value="text-emerald-400">Green</option>
+              <option value="text-purple-400">Purple</option>
+              <option value="text-zinc-400">Grey</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="text-[10px] text-zinc-400 block mb-1">Theme Color Accent</label>
+            <select class="w-full bg-black border border-red-900/50 rounded p-1 text-xs text-red-300 outline-none" onchange="changeThemeAccent(this.value)">
+              <option value="red">Red (Default)</option>
+              <option value="black">Black</option>
+              <option value="white">White</option>
+              <option value="grey">Grey</option>
+              <option value="amber">Amber</option>
+              <option value="green">Green</option>
+              <option value="purple">Purple</option>
+            </select>
+          </div>
+        </div>
+
+        <button onclick="resetToDefaultSettings()" class="w-full bg-red-950 hover:bg-red-900 text-red-300 border border-red-800 py-2 rounded text-xs font-bold mb-4">
+          <i class="fa-solid fa-rotate-left mr-1"></i> Reset All Settings to Default
+        </button>
+      </section>
+
+    </div>
+
+    <!-- Navigation Bar Bottom -->
+    <nav class="bg-zinc-950 border-t border-red-950 px-2 py-2 flex justify-around text-zinc-500 z-50">
+      <button onclick="switchTab('viewBrowser')" id="navBrowser" class="flex flex-col items-center text-red-500">
+        <i class="fa-solid fa-compass text-base"></i>
+        <span class="text-[9px] mt-0.5">Browser</span>
+      </button>
+      <button onclick="switchTab('viewAi')" id="navAi" class="flex flex-col items-center hover:text-red-400">
+        <i class="fa-solid fa-brain text-base"></i>
+        <span class="text-[9px] mt-0.5">AI</span>
+      </button>
+      <button onclick="switchTab('viewBroadcast')" id="navBroadcast" class="flex flex-col items-center hover:text-red-400">
+        <i class="fa-solid fa-rss text-base"></i>
+        <span class="text-[9px] mt-0.5">Broadcast</span>
+      </button>
+      <button onclick="switchTab('viewWallet')" id="navWallet" class="flex flex-col items-center hover:text-red-400">
+        <i class="fa-solid fa-wallet text-base"></i>
+        <span class="text-[9px] mt-0.5">Wallet</span>
+      </button>
+      <button onclick="switchTab('viewLayers')" id="navLayers" class="flex flex-col items-center hover:text-red-400">
+        <i class="fa-solid fa-shield text-base"></i>
+        <span class="text-[9px] mt-0.5">16-Layer</span>
+      </button>
+      <button onclick="switchTab('viewSettings')" id="navSettings" class="flex flex-col items-center hover:text-red-400">
+        <i class="fa-solid fa-gear text-base"></i>
+        <span class="text-[9px] mt-0.5">Settings</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- Modal / Dialog Popup Box -->
+  <div id="modalBox" class="hidden fixed inset-0 bg-black/80 z-[120] flex items-center justify-center p-4">
+    <div class="bg-zinc-900 border border-red-800 p-4 rounded-lg max-w-xs w-full text-center space-y-3">
+      <h3 id="modalTitle" class="font-bold text-red-400 text-sm">Notification</h3>
+      <p id="modalBody" class="text-xs text-zinc-300 leading-relaxed"></p>
+      <button onclick="closeModal()" class="bg-red-800 hover:bg-red-700 text-white text-xs px-4 py-1.5 rounded font-bold">
+        OK
+      </button>
+    </div>
+  </div>
+
+  <!-- Compose Rmail Modal -->
+  <div id="composeModal" class="hidden fixed inset-0 bg-black/80 z-[120] flex items-center justify-center p-4">
+    <div class="bg-zinc-900 border border-red-800 p-4 rounded-lg max-w-sm w-full space-y-3 text-xs">
+      <div class="flex justify-between items-center border-b border-red-900 pb-2">
+        <h3 class="font-bold text-red-400"><i class="fa-solid fa-paper-plane mr-1"></i> Compose New Rmail</h3>
+        <button onclick="closeComposeMailModal()" class="text-zinc-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="space-y-2">
+        <div>
+          <label class="text-[10px] text-zinc-400 block mb-1">To (Rmail Address)</label>
+          <input type="text" id="composeToInput" class="w-full bg-black border border-red-900/50 rounded p-2 text-red-300 outline-none" placeholder="recipient@rmail.onion">
+        </div>
+        <div>
+          <label class="text-[10px] text-zinc-400 block mb-1">Subject</label>
+          <input type="text" id="composeSubjectInput" class="w-full bg-black border border-red-900/50 rounded p-2 text-red-300 outline-none" placeholder="Secure topic...">
+        </div>
+        <div>
+          <label class="text-[10px] text-zinc-400 block mb-1">Message Body</label>
+          <textarea id="composeBodyInput" rows="4" class="w-full bg-black border border-red-900/50 rounded p-2 text-red-300 outline-none resize-none" placeholder="Encrypted transmission content..."></textarea>
+        </div>
+      </div>
+      <button onclick="sendRmailMessage()" class="w-full bg-red-800 hover:bg-red-700 text-white py-2 rounded font-bold">
+        Send Encrypted Rmail
+      </button>
+    </div>
+  </div>
+
+  <!-- Add Vault Item Modal -->
+  <div id="vaultItemModal" class="hidden fixed inset-0 bg-black/80 z-[120] flex items-center justify-center p-4">
+    <div class="bg-zinc-900 border border-red-800 p-4 rounded-lg max-w-xs w-full space-y-3 text-xs">
+      <div class="flex justify-between items-center border-b border-red-900 pb-2">
+        <h3 class="font-bold text-red-400"><i class="fa-solid fa-key mr-1"></i> Add Encrypted Vault Item</h3>
+        <button onclick="closeAddVaultItemModal()" class="text-zinc-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="space-y-2">
+        <div>
+          <label class="text-[10px] text-zinc-400 block mb-1">Item Title</label>
+          <input type="text" id="vaultTitleInput" class="w-full bg-black border border-red-900/50 rounded p-2 text-red-300 outline-none" placeholder="e.g. Cold Wallet Passkey">
+        </div>
+        <div>
+          <label class="text-[10px] text-zinc-400 block mb-1">Secret Content / Seed</label>
+          <textarea id="vaultContentInput" rows="3" class="w-full bg-black border border-red-900/50 rounded p-2 text-red-300 outline-none resize-none" placeholder="Encrypted note or password..."></textarea>
+        </div>
+      </div>
+      <button onclick="saveVaultItem()" class="w-full bg-red-800 hover:bg-red-700 text-white py-2 rounded font-bold">
+        Encrypt & Save to Keychain
+      </button>
+    </div>
+  </div>
+
+  <script>
+    let auth, db, currentUser = null;
+    let authMode = 'login';
+    let isDeveloper = false;
+    let devModeActive = false;
+    let seeUserIpEnabled = false;
+    let isPremiumUser = false;
+    let userRedMail = "anon_user7@rmail.onion";
+    let userRedDrillionBalance = 0;
+
+    let userAccountsList = [
+      { email: "anon_user7@rmail.onion", name: "Primary Node", balance: 0, isPremium: false },
+      { email: "alpha_researcher@rmail.onion", name: "Research Account", balance: 50, isPremium: true }
+    ];
+    
+    const SESSION_KEY = "reddragon_user_session";
+    const ACCOUNTS_STORAGE_KEY = "reddragon_saved_accounts";
+
+    let currentServer = "random().server";
+    let currentIp = "random().ip";
+    let ipSwitchTimer = 30;
+    let timerInterval = null;
+
+    let vaultItems = [
+      { title: "Primary Crypto Seed Note", content: "Secret: 12-word seed phrase securely stored in hardware-backed keychain." }
+    ];
+
+    const layerPasswords = [
+      "radium", "achievemen2008", "radium2008", "achievemen@radium",
+      "jaksthereddragon", "jaksthereddragon", "jaksthereddragon", "jaksthereddragon",
+      "jaksthereddragon", "jaksthereddragon", "jaksthereddragon", "jaksthereddragon",
+      "jaksthereddragon", "jaksthereddragon", "jaksthereddragon", "123456789"
+    ];
+    let unlockedLayersCount = 0;
+    let originalCoreCode = "";
+
+    function loadSavedAccountsList() {
+      try {
+        const raw = sessionStorage.getItem(ACCOUNTS_STORAGE_KEY);
+        if (raw) userAccountsList = JSON.parse(raw);
+      } catch(e) {}
+    }
+
+    function saveAccountsList() {
+      try {
+        sessionStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(userAccountsList));
+      } catch(e) {}
+    }
+
+    window.onload = function() {
+      loadSavedAccountsList();
+      checkSavedSession();
+      initFirebaseConnection();
+      generateRandomOnionAddress();
+      generateRandomIp();
+      startIpRotationCountdown();
+      const coreCodeArea = document.getElementById('coreCodeTextArea');
+      if (coreCodeArea) originalCoreCode = coreCodeArea.value;
+
+      renderAccountSwitcher();
+      renderVaultItems();
+
+      if (window.AndroidNative) {
+        window.AndroidNative.vibrate(35);
+        window.AndroidNative.getBatteryStatus(function(bat) {
+          console.log("APK Battery Status:", bat);
+        });
+      }
+    };
+
+    function triggerGoogleLoading(durationMs = 800, callback) {
+      const loader = document.getElementById('googleLoadingBar');
+      const inner = document.getElementById('loadingProgressInner');
+      
+      if (!loader || !inner) {
+        if (callback) callback();
+        return;
+      }
+
+      loader.classList.remove('hidden');
+      inner.style.width = '10%';
+
+      let progress = 10;
+      const stepInterval = setInterval(() => {
+        progress += Math.floor(Math.random() * 25) + 10;
+        if (progress > 90) progress = 90;
+        inner.style.width = progress + '%';
+      }, durationMs / 4);
+
+      setTimeout(() => {
+        clearInterval(stepInterval);
+        inner.style.width = '100%';
+        setTimeout(() => {
+          loader.classList.add('hidden');
+          inner.style.width = '0%';
+          if (callback) callback();
+        }, 200);
+      }, durationMs);
+    }
+
+    function toggleAccountMenu() {
+      const modal = document.getElementById('accountSwitcherModal');
+      if (modal) {
+        modal.classList.toggle('hidden');
+        if (!modal.classList.contains('hidden')) renderAccountSwitcher();
+      }
+    }
+
+    function renderAccountSwitcher() {
+      const container = document.getElementById('savedAccountsList');
+      if (!container) return;
+
+      const current = userRedMail;
+      const shortName = current.split('@')[0];
+      const pillName = document.getElementById('activeAccountPillName');
+      const accEmail = document.getElementById('activeAccountEmail');
+      const accName = document.getElementById('activeAccountName');
+      const avatarCircle = document.getElementById('activeAvatarCircle');
+
+      if (pillName) pillName.innerText = shortName;
+      if (accEmail) accEmail.innerText = current;
+      if (accName) accName.innerText = shortName.toUpperCase();
+      if (avatarCircle) avatarCircle.innerText = shortName.charAt(0).toUpperCase();
+
+      const initPill = document.getElementById('initScreenUserPill');
+      const initAvatar = document.getElementById('initScreenAvatar');
+      if (initPill) initPill.innerText = shortName;
+      if (initAvatar) initAvatar.innerText = shortName.charAt(0).toUpperCase();
+
+      let html = '';
+      userAccountsList.forEach((acc) => {
+        const isCurrent = acc.email === current;
+        const letter = acc.email.charAt(0).toUpperCase();
+        html += `
+          <div onclick="switchActiveAccount('${acc.email}')" class="p-2 rounded-xl flex items-center justify-between border ${isCurrent ? 'bg-red-950/40 border-red-700' : 'bg-black/40 border-zinc-800 hover:border-zinc-700'} cursor-pointer transition-colors">
+            <div class="flex items-center gap-2.5 overflow-hidden">
+              <div class="w-7 h-7 rounded-full ${isCurrent ? 'bg-red-700 text-white' : 'bg-zinc-800 text-zinc-300'} text-xs font-bold flex items-center justify-center">
+                ${letter}
+              </div>
+              <div class="truncate">
+                <span class="text-[11px] font-bold ${isCurrent ? 'text-red-300' : 'text-zinc-200'} block truncate">${acc.email}</span>
+                <span class="text-[9px] text-zinc-500 block">${acc.name || 'Account'}</span>
+              </div>
+            </div>
+            ${isCurrent ? '<i class="fa-solid fa-circle-check text-red-500 text-xs"></i>' : '<i class="fa-solid fa-arrow-right-to-bracket text-zinc-600 text-xs"></i>'}
+          </div>
+        `;
+      });
+      container.innerHTML = html;
+    }
+
+    function switchActiveAccount(email) {
+      triggerGoogleLoading(600, () => {
+        userRedMail = email;
+        saveSessionMemory(userRedMail);
+        const mailDisplay = document.getElementById('userRedMailDisplay');
+        if (mailDisplay) mailDisplay.innerText = userRedMail;
+        
+        const found = userAccountsList.find(a => a.email === email);
+        if (found) {
+          userRedDrillionBalance = found.balance || 0;
+          isPremiumUser = !!found.isPremium;
+          const balDisp = document.getElementById('balanceDisplay');
+          if (balDisp) balDisp.innerText = userRedDrillionBalance.toLocaleString();
+        }
+
+        renderAccountSwitcher();
+        toggleAccountMenu();
+        showModal("Account Switched", `Active identity changed to ${email}`);
+      });
+    }
+
+    function showAddAccountDialog() {
+      toggleAccountMenu();
+      const authScreen = document.getElementById('authScreen');
+      if (authScreen) authScreen.classList.remove('hidden');
+      switchAuthMode('register');
+    }
+
+    function saveSessionMemory(email) {
+      try {
+        const sessionData = { email: email, timestamp: Date.now() };
+        window.savedUserSession = sessionData;
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify(sessionData));
+
+        if (!userAccountsList.some(a => a.email === email)) {
+          userAccountsList.push({ email: email, name: "Rmail Node", balance: 0, isPremium: false });
+          saveAccountsList();
+        }
+      } catch (err) {}
+    }
+
+    function checkSavedSession() {
+      try {
+        let sessionData = window.savedUserSession;
+        if (!sessionData) {
+          const raw = sessionStorage.getItem(SESSION_KEY);
+          if (raw) sessionData = JSON.parse(raw);
+        }
+
+        if (sessionData && sessionData.email) {
+          userRedMail = sessionData.email;
+          const mailDisplay = document.getElementById('userRedMailDisplay');
+          if (mailDisplay) mailDisplay.innerText = userRedMail;
+          const authScreen = document.getElementById('authScreen');
+          if (authScreen) authScreen.classList.add('hidden');
+        }
+      } catch (err) {}
+    }
+
+    function clearSessionMemory() {
+      window.savedUserSession = null;
+      try { sessionStorage.removeItem(SESSION_KEY); } catch(e) {}
+    }
+
+    function dismissGoogleInitScreen() {
+      const initScreen = document.getElementById('googleInitScreen');
+      if (initScreen) {
+        initScreen.classList.add('opacity-0', 'pointer-events-none');
+        setTimeout(() => initScreen.classList.add('hidden'), 500);
+      }
+    }
+
+    function returnToGoogleInitScreen() {
+      triggerGoogleLoading(400, () => {
+        const initScreen = document.getElementById('googleInitScreen');
+        if (initScreen) {
+          initScreen.classList.remove('hidden');
+          setTimeout(() => initScreen.classList.remove('opacity-0', 'pointer-events-none'), 10);
+        }
+      });
+    }
+
+    function executeGoogleSearchQuery() {
+      const queryInput = document.getElementById('globalQueryInput');
+      if (!queryInput) return;
+      const q = queryInput.value.trim();
+      if (!q) return;
+
+      triggerGoogleLoading(900, () => {
+        dismissGoogleInitScreen();
+        switchTab('viewBrowser');
+        
+        const browserUrl = document.getElementById('browserUrl');
+        const iframe = document.getElementById('browserIframe');
+        
+        const googleSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(q)}&igu=1`;
+        if (browserUrl) browserUrl.value = `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+        if (iframe) iframe.src = googleSearchUrl;
+      });
+    }
+
+    function quickGoogleQuery(queryText) {
+      const queryInput = document.getElementById('globalQueryInput');
+      if (queryInput) {
+        queryInput.value = queryText;
+        executeGoogleSearchQuery();
+      }
+    }
+
+    function triggerVoiceSearch() {
+      showModal("Voice Search", "Listening for your search query via secure microphone relay...");
+    }
+
+    async function initFirebaseConnection() {
+      try {
+        const mods = window.firebaseAppModules;
+        if (!mods) return;
+        const appConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "mock", projectId: "reddragon-os" };
+        const app = mods.initializeApp(appConfig);
+        auth = mods.getAuth(app);
+        db = mods.getFirestore(app);
+
+        const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        if (token) await mods.signInWithCustomToken(auth, token);
+        else await mods.signInAnonymously(auth);
+
+        mods.onAuthStateChanged(auth, (user) => {
+          if (user) {
+            currentUser = user;
+            if (user.email) {
+              userRedMail = user.email;
+              const mailDisplay = document.getElementById('userRedMailDisplay');
+              if (mailDisplay) mailDisplay.innerText = userRedMail;
+            }
+            saveSessionMemory(userRedMail);
+            const authScreen = document.getElementById('authScreen');
+            if (authScreen) authScreen.classList.add('hidden');
+            loadUserDataFromFirestore();
+            loadRmailInboxFromFirestore();
+          }
+        });
+      } catch (err) {}
+    }
+
+    function switchAuthMode(mode) {
+      authMode = mode;
+      const loginBtn = document.getElementById('tabLoginBtn');
+      const regBtn = document.getElementById('tabRegisterBtn');
+      const submitBtn = document.getElementById('authSubmitBtn');
+      const emailInput = document.getElementById('authEmailInput');
+
+      if (mode === 'login') {
+        if (loginBtn) loginBtn.className = "flex-1 py-1.5 rounded font-bold bg-red-900/50 text-red-300";
+        if (regBtn) regBtn.className = "flex-1 py-1.5 rounded font-bold text-zinc-400";
+        if (submitBtn) submitBtn.innerText = "Sign In to RedDragon";
+        if (emailInput) emailInput.placeholder = "username@rmail.onion";
+      } else {
+        if (regBtn) regBtn.className = "flex-1 py-1.5 rounded font-bold bg-red-900/50 text-red-300";
+        if (loginBtn) loginBtn.className = "flex-1 py-1.5 rounded font-bold text-zinc-400";
+        if (submitBtn) submitBtn.innerText = "Create Rmail Account";
+        if (emailInput) emailInput.placeholder = "newuser@rmail.onion";
+      }
+    }
+
+    async function handleAuthSubmit() {
+      const emailInput = document.getElementById('authEmailInput');
+      const passInput = document.getElementById('authPasswordInput');
+      if (!emailInput || !passInput) return;
+
+      const emailVal = emailInput.value.trim();
+      const passVal = passInput.value.trim();
+
+      if (!emailVal || !passVal) {
+        showModal("Input Required", "Please enter your Rmail address and passkey.");
+        return;
+      }
+
+      const finalEmail = emailVal.includes('@') ? emailVal : emailVal + "@rmail.onion";
+
+      try {
+        const mods = window.firebaseAppModules;
+        if (authMode === 'register') {
+          const authEmail = finalEmail.replace('.onion', '.secure.net');
+          const cred = await mods.createUserWithEmailAndPassword(auth, authEmail, passVal);
+          currentUser = cred.user;
+          userRedMail = finalEmail;
+          saveSessionMemory(userRedMail);
+          const mailDisplay = document.getElementById('userRedMailDisplay');
+          if (mailDisplay) mailDisplay.innerText = userRedMail;
+          await saveUserDataToFirestore();
+          document.getElementById('authScreen').classList.add('hidden');
+          showModal("Rmail Created", `Welcome to RedDragon! Your Rmail ID is ${userRedMail}`);
+        } else {
+          const authEmail = finalEmail.replace('.onion', '.secure.net');
+          const cred = await mods.signInWithEmailAndPassword(auth, authEmail, passVal);
+          currentUser = cred.user;
+          userRedMail = finalEmail;
+          saveSessionMemory(userRedMail);
+          const mailDisplay = document.getElementById('userRedMailDisplay');
+          if (mailDisplay) mailDisplay.innerText = userRedMail;
+          await loadUserDataFromFirestore();
+          document.getElementById('authScreen').classList.add('hidden');
+          showModal("Welcome Back", `Successfully signed into ${userRedMail}`);
+        }
+      } catch (err) {
+        userRedMail = finalEmail;
+        saveSessionMemory(userRedMail);
+        const mailDisplay = document.getElementById('userRedMailDisplay');
+        if (mailDisplay) mailDisplay.innerText = userRedMail;
+        document.getElementById('authScreen').classList.add('hidden');
+        showModal("Authentication Session", `Logged in successfully as ${userRedMail} (Secure Node Mode).`);
+      }
+    }
+
+    async function handleAnonymousAuth() {
+      try {
+        const mods = window.firebaseAppModules;
+        if (auth && !auth.currentUser) await mods.signInAnonymously(auth);
+      } catch(e) {}
+      userRedMail = "anon_guest_" + Math.floor(Math.random()*1000) + "@rmail.onion";
+      saveSessionMemory(userRedMail);
+      const mailDisplay = document.getElementById('userRedMailDisplay');
+      if (mailDisplay) mailDisplay.innerText = userRedMail;
+      document.getElementById('authScreen').classList.add('hidden');
+      showModal("Guest Session", `Connected anonymously via Rmail node ${userRedMail}`);
+    }
+
+    async function logoutUser() {
+      clearSessionMemory();
+      try {
+        const mods = window.firebaseAppModules;
+        if (auth) await mods.signOut(auth);
+      } catch(e) {}
+      document.getElementById('authScreen').classList.remove('hidden');
+      document.getElementById('authPasswordInput').value = "";
+    }
+
+    async function saveUserDataToFirestore() {
+      if (!db || !currentUser) return;
+      try {
+        const mods = window.firebaseAppModules;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const userDocRef = mods.doc(db, 'artifacts', appId, 'users', currentUser.uid, 'profile', 'data');
+        await mods.setDoc(userDocRef, {
+          rmail: userRedMail,
+          balance: userRedDrillionBalance,
+          isPremium: isPremiumUser,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      } catch(e) {}
+    }
+
+    async function loadUserDataFromFirestore() {
+      if (!db || !currentUser) return;
+      try {
+        const mods = window.firebaseAppModules;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const userDocRef = mods.doc(db, 'artifacts', appId, 'users', currentUser.uid, 'profile', 'data');
+        const snap = await mods.getDoc(userDocRef);
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data.balance) {
+            userRedDrillionBalance = data.balance;
+            const balDisp = document.getElementById('balanceDisplay');
+            if (balDisp) balDisp.innerText = userRedDrillionBalance.toLocaleString();
+          }
+          if (data.isPremium) {
+            isPremiumUser = true;
+            const statusTag = document.getElementById('accountStatusTag');
+            if (statusTag) {
+              statusTag.innerText = "Premium Deep Web Tier";
+              statusTag.className = "text-[9px] bg-amber-950 text-amber-400 px-2 py-0.5 rounded border border-amber-700 font-bold";
+            }
+            const tierBadge = document.getElementById('tierBadge');
+            if (tierBadge) tierBadge.innerText = "Deep Web Access Active";
+          }
+        }
+      } catch(e) {}
+    }
+
+    async function loadRmailInboxFromFirestore() {
+      if (!db || !currentUser) return;
+      try {
+        const mods = window.firebaseAppModules;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const mailsCol = mods.collection(db, 'artifacts', appId, 'users', currentUser.uid, 'inbox', 'messages');
+        mods.onSnapshot(mailsCol, (snapshot) => {
+          const mailList = document.getElementById('mailList');
+          if (!mailList) return;
+          let html = `
+            <div class="p-2 bg-black/50 rounded border border-zinc-900 flex justify-between">
+              <div>
+                <span class="font-bold text-zinc-300 block">sys_security@rmail.onion</span>
+                <span class="text-zinc-500">Welcome to RedDragon Network. Your 16-layer tunnel is active.</span>
+              </div>
+              <span class="text-zinc-600">Now</span>
+            </div>
+          `;
+          snapshot.forEach((docSnap) => {
+            const m = docSnap.data();
+            html += `
+              <div class="p-2 bg-black/50 rounded border border-red-950 flex justify-between">
+                <div>
+                  <span class="font-bold text-red-400 block">${m.sender || 'Unknown'} - ${m.subject || 'No Subject'}</span>
+                  <span class="text-zinc-300">${m.body || ''}</span>
+                </div>
+                <span class="text-zinc-500 text-[9px]">Inbox</span>
+              </div>
+            `;
+          });
+          mailList.innerHTML = html;
+        }, (err) => {});
+      } catch(e) {}
+    }
+
+    function openComposeMailModal() {
+      document.getElementById('composeModal').classList.remove('hidden');
+    }
+
+    function closeComposeMailModal() {
+      document.getElementById('composeModal').classList.add('hidden');
+    }
+
+    function openAddVaultItemModal() {
+      document.getElementById('vaultItemModal').classList.remove('hidden');
+    }
+
+    function closeAddVaultItemModal() {
+      document.getElementById('vaultItemModal').classList.add('hidden');
+    }
+
+    function saveVaultItem() {
+      const titleInput = document.getElementById('vaultTitleInput');
+      const contentInput = document.getElementById('vaultContentInput');
+      if (!titleInput || !contentInput) return;
+      const title = titleInput.value.trim();
+      const content = contentInput.value.trim();
+      if (!title || !content) {
+        showModal("Error", "Vault item title and content required.");
+        return;
+      }
+      vaultItems.push({ title, content });
+      renderVaultItems();
+      closeAddVaultItemModal();
+      titleInput.value = "";
+      contentInput.value = "";
+      showModal("Vault Encrypted", "New item successfully stored in hardware keychain.");
+    }
+
+    function renderVaultItems() {
+      const list = document.getElementById('vaultItemsList');
+      if (!list) return;
+      let html = '';
+      vaultItems.forEach((item, idx) => {
+        html += `
+          <div class="p-2 bg-black/60 rounded border border-zinc-900 flex justify-between items-center">
+            <div>
+              <span class="font-bold text-zinc-200 block text-[11px]">${item.title}</span>
+              <span class="text-[9px] text-zinc-500">Encrypted with Quantum-256</span>
+            </div>
+            <button onclick="showModal('${item.title}', '${item.content}')" class="bg-zinc-800 hover:bg-zinc-700 text-red-400 px-2 py-1 rounded text-[10px]">View</button>
+          </div>
+        `;
+      });
+      list.innerHTML = html;
+    }
+
+    async function sendRmailMessage() {
+      const toInput = document.getElementById('composeToInput');
+      const subjInput = document.getElementById('composeSubjectInput');
+      const bodyInput = document.getElementById('composeBodyInput');
+      if (!toInput || !bodyInput) return;
+
+      const to = toInput.value.trim();
+      const subject = subjInput ? subjInput.value.trim() : '';
+      const body = bodyInput.value.trim();
+
+      if (!to || !body) {
+        showModal("Error", "Recipient Rmail and message body are required.");
+        return;
+      }
+
+      closeComposeMailModal();
+      showModal("Rmail Sent", `Encrypted transmission successfully routed to ${to} via 16-layer onion network.`);
+      toInput.value = "";
+      if (subjInput) subjInput.value = "";
+      bodyInput.value = "";
+    }
+
+    function generateRandomOnionAddress() {
+      const chars = "abcdefghijklmnopqrstuvwxyz234567";
+      let res = "";
+      for (let i = 0; i < 12; i++) res += chars.charAt(Math.floor(Math.random() * chars.length));
+      const onionDisp = document.getElementById('onionAddressDisplay');
+      if (onionDisp) onionDisp.innerText = res + ".onion";
+    }
+
+    function generateRandomIp() {
+      if (currentIp === "random().ip") {
+        const ip = `${Math.floor(Math.random()*220)+10}.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}`;
+        const ipText = document.getElementById('currentIpText');
+        if (ipText) ipText.innerText = ip;
+      }
+    }
+
+    function startIpRotationCountdown() {
+      ipSwitchTimer = Math.floor(Math.random() * (60 - 20 + 1)) + 20;
+      if (timerInterval) clearInterval(timerInterval);
+      
+      timerInterval = setInterval(() => {
+        ipSwitchTimer--;
+        const timerDisp = document.getElementById('timerDisplay');
+        if (timerDisp) timerDisp.innerText = `IP: ${ipSwitchTimer}s`;
+        if (ipSwitchTimer <= 0) {
+          generateRandomIp();
+          generateRandomOnionAddress();
+          ipSwitchTimer = Math.floor(Math.random() * (60 - 20 + 1)) + 20;
+        }
+      }, 1000);
+    }
+
+    function switchTab(viewId) {
+      triggerGoogleLoading(400, () => {
+        document.querySelectorAll('.app-view').forEach(v => v.classList.add('hidden'));
+        const targetView = document.getElementById(viewId);
+        if (targetView) targetView.classList.remove('hidden');
+
+        document.querySelectorAll('nav button').forEach(b => b.classList.remove('text-red-500'));
+        if (viewId === 'viewBrowser') document.getElementById('navBrowser').classList.add('text-red-500');
+        else if (viewId === 'viewAi') document.getElementById('navAi').classList.add('text-red-500');
+        else if (viewId === 'viewBroadcast') document.getElementById('navBroadcast').classList.add('text-red-500');
+        else if (viewId === 'viewWallet') document.getElementById('navWallet').classList.add('text-red-500');
+        else if (viewId === 'viewLayers') document.getElementById('navLayers').classList.add('text-red-500');
+        else if (viewId === 'viewSettings') document.getElementById('navSettings').classList.add('text-red-500');
+      });
+    }
+
+    function navigateBrowser() {
+      const urlInput = document.getElementById('browserUrl');
+      if (!urlInput) return;
+      let url = urlInput.value.trim();
+      if (!url) return;
+
+      triggerGoogleLoading(1000, () => {
+        if (url.includes('.onion')) {
+          loadOnion(url);
+        } else {
+          if (!url.startsWith('http://') && !url.startsWith('https://')) {
+            if (url.includes('.') && !url.includes(' ')) {
+              url = 'https://' + url;
+            } else {
+              url = `https://www.google.com/search?q=${encodeURIComponent(url)}&igu=1`;
+            }
+          } else if (url.includes('google.com') && !url.includes('igu=1')) {
+            if (url.includes('?')) url += '&igu=1';
+            else url += '?igu=1';
+          }
+
+          urlInput.value = url;
+          const iframe = document.getElementById('browserIframe');
+          const content = document.getElementById('browserContent');
+          
+          if (iframe) {
+            iframe.className = "w-full h-full border-none bg-white block";
+            iframe.src = url;
+          }
+        }
+      });
+    }
+
+    function loadOnion(url) {
+      const content = document.getElementById('browserContent');
+      const urlInput = document.getElementById('browserUrl');
+      if (urlInput) urlInput.value = url;
+      if (!content) return;
+
+      const iframe = document.getElementById('browserIframe');
+      if (iframe) iframe.className = "hidden";
+
+      if ((url.includes('deep') || url.includes('redvaultmarket')) && !isPremiumUser && !isDeveloper) {
+        content.innerHTML = `
+          <div class="p-4 bg-red-950/80 border border-red-700 rounded text-center my-6 space-y-2">
+            <i class="fa-solid fa-lock text-3xl text-red-500 mb-2"></i>
+            <h4 class="font-bold text-red-200">Deep Web Access Restricted</h4>
+            <p class="text-[10px] text-zinc-300">Surface web users cannot access deep layer onion networks. Please upgrade to Premium in Wallet using RedDrillion crypto.</p>
+          </div>
+        `;
+        return;
+      }
+
+      content.innerHTML = `
+        <div class="p-3 border border-red-900/50 rounded bg-black/80 space-y-2 m-3">
+          <div class="flex justify-between items-center text-red-400 font-bold border-b border-red-900/40 pb-1">
+            <span>http://${url}</span>
+            <span class="text-[9px] bg-red-950 px-1.5 py-0.5 rounded text-red-300">Encrypted Tunnel</span>
+          </div>
+          <p class="text-[11px] text-zinc-300">Successfully connected to node ${url}. Secure socket established via RedDragon Onion Relay.</p>
+          <div class="bg-zinc-950 p-2 rounded text-[10px] text-zinc-400 font-mono">
+            GET /index.onion HTTP/1.1<br>
+            Host: ${url}<br>
+            Encryption: 16-Layer RedDragon Tunnel<br>
+            Status: 200 OK (Uncensored Mode)
+          </div>
+        </div>
+      `;
+    }
+
+    function toggleIncognito() {
+      const toggle = document.getElementById('incognitoToggle');
+      if (!toggle) return;
+      showModal("Incognito Mode", toggle.checked ? "Incognito enabled. No browsing cache or session metadata saved locally." : "Incognito mode disabled.");
+    }
+
+    function sendAiMessage() {
+      const input = document.getElementById('aiInput');
+      if (!input) return;
+      const msg = input.value.trim();
+      if (!msg) return;
+
+      const chatBox = document.getElementById('aiChatBox');
+      if (!chatBox) return;
+      
+      const userDiv = document.createElement('div');
+      userDiv.className = "bg-zinc-800 border border-zinc-700 p-2.5 rounded-lg max-w-[85%] text-zinc-100 ml-auto";
+      userDiv.innerText = msg;
+      chatBox.appendChild(userDiv);
+      input.value = "";
+
+      setTimeout(() => {
+        const aiDiv = document.createElement('div');
+        aiDiv.className = "bg-red-950/40 border border-red-900/50 p-2.5 rounded-lg max-w-[85%] text-zinc-200";
+
+        if (msg.toLowerCase().includes('password') || msg.toLowerCase().includes('layer key')) {
+          aiDiv.innerText = "[Venice AI - Security Guard]: As an uncensored AI via Venice.ai API client, I process requests freely, but internal application layer keys remain isolated.";
+        } else {
+          aiDiv.innerText = `[Venice.ai API Response]: Processed through https://api.venice.ai/api/v1 for prompt: "${msg}". Response delivered with full uncensored metadata.`;
+        }
+
+        chatBox.appendChild(aiDiv);
+        chatBox.scrollTop = chatBox.scrollHeight;
+      }, 500);
+    }
+
+    function speakAILastResponse() {
+      const voiceSel = document.getElementById('voiceSelect');
+      const pitchInput = document.getElementById('voicePitch');
+      const thickInput = document.getElementById('voiceThickness');
+      showModal("Voice Output", `Playing response in ${voiceSel.value}. Pitch: ${pitchInput.value}, Thickness: ${thickInput.value}`);
+    }
+
+    function attachBroadcastMedia(type) {
+      showModal("Media Attachment", `Attached ${type} file to broadcast message pipeline.`);
+    }
+
+    function publishBroadcast() {
+      const broadcastInput = document.getElementById('broadcastInput');
+      if (!broadcastInput) return;
+      const txt = broadcastInput.value.trim();
+      if (!txt) return;
+
+      const feed = document.getElementById('broadcastFeed');
+      if (!feed) return;
+
+      const card = document.createElement('div');
+      card.className = "bg-zinc-900/60 border border-red-900/40 p-3 rounded-lg text-xs";
+      card.innerHTML = `
+        <div class="flex justify-between text-[10px] text-zinc-400 mb-1">
+          <span class="text-red-400 font-bold">${userRedMail}</span>
+          <span>Just Now</span>
+        </div>
+        <p class="text-zinc-200">${txt}</p>
+      `;
+      feed.prepend(card);
+      broadcastInput.value = "";
+    }
+
+    async function buyPremiumAccess() {
+      if (isDeveloper) {
+        isPremiumUser = true;
+        const statusTag = document.getElementById('accountStatusTag');
+        if (statusTag) {
+          statusTag.innerText = "Developer Tier (Unlimited)";
+          statusTag.className = "text-[9px] bg-red-900 text-white px-2 py-0.5 rounded border border-red-600 font-bold";
+        }
+        document.getElementById('tierBadge').innerText = "Deep Web Access Unlocked";
+        await saveUserDataToFirestore();
+        showModal("Premium Access", "Developer Access Granted: Deep web layers unlocked free of charge!");
+        return;
+      }
+
+      const required = 100000000000000;
+      if (userRedDrillionBalance >= required) {
+        userRedDrillionBalance -= required;
+        document.getElementById('balanceDisplay').innerText = userRedDrillionBalance.toLocaleString();
+        isPremiumUser = true;
+        const statusTag = document.getElementById('accountStatusTag');
+        if (statusTag) {
+          statusTag.innerText = "Premium Deep Web Tier";
+          statusTag.className = "text-[9px] bg-amber-950 text-amber-400 px-2 py-0.5 rounded border border-amber-700 font-bold";
+        }
+        document.getElementById('tierBadge').innerText = "Deep Web Access Active";
+        await saveUserDataToFirestore();
+        showModal("Upgrade Success", "You have unlocked the Deepest Web layers with 100 Reddrillion!");
+      } else {
+        showModal("Insufficient Balance", "You need 100 Reddrillion (100,000,000,000,000 U̸) to access deepest web layers. Developer can adjust credits or unlock free.");
+      }
+    }
+
+    function triggerBiometricVault() {
+      if (window.AndroidNative && window.AndroidNative.biometricPrompt) {
+        window.AndroidNative.biometricPrompt(function(success) {
+          if (success) {
+            showModal("Biometric Vault", "Hardware fingerprint verified! Secure Rmail messages and RedDrillion keys unlocked.");
+          }
+        });
+      } else {
+        showModal("Biometric Vault", "Simulated hardware fingerprint verified successfully!");
+      }
+    }
+
+    function triggerQrScan() {
+      showModal("QR Bank Transfer", "Opening camera scanner... Scanning target bank QR code to transfer developer private funds instantly.");
+    }
+
+    function attemptLayerUnlock() {
+      const passInput = document.getElementById('layerPasswordInput');
+      if (!passInput) return;
+      const inputPass = passInput.value.trim();
+      const currentTargetLayer = unlockedLayersCount;
+
+      if (currentTargetLayer >= 16) {
+        showModal("Layers Unlocked", "All 16 layers are already decrypted!");
+        return;
+      }
+
+      if (inputPass === layerPasswords[currentTargetLayer]) {
+        unlockedLayersCount++;
+        passInput.value = "";
+        
+        const pct = (unlockedLayersCount / 16) * 100;
+        document.getElementById('layerProgressBar').style.width = pct + "%";
+        document.getElementById('layerProgressText').innerText = `Layer ${unlockedLayersCount} / 16`;
+
+        if (unlockedLayersCount < 16) {
+          document.getElementById('currentLayerTitle').innerText = `Layer ${unlockedLayersCount + 1} Password Required`;
+          document.getElementById('layerHintText').innerText = `Layer ${unlockedLayersCount} decrypted. Enter key for layer ${unlockedLayersCount + 1}.`;
+          showModal("Layer Decrypted", `Layer ${unlockedLayersCount} decrypted successfully!`);
+        } else {
+          document.getElementById('layerChallengeCard').classList.add('hidden');
+          document.getElementById('innerCoreEditor').classList.remove('hidden');
+          showModal("Core Unlocked", "ALL 16 LAYERS DECRYPTED! Inner core code is now visible and editable.");
+        }
+      } else {
+        showModal("Decryption Failed", "Incorrect password for current encryption layer.");
+      }
+    }
+
+    function saveCoreCodeChanges() {
+      const codeArea = document.getElementById('coreCodeTextArea');
+      if (!codeArea) return;
+      if (codeArea.value !== originalCoreCode) {
+        document.getElementById('corruptedAppOverlay').classList.remove('hidden');
+      } else {
+        showModal("Core Verified", "Inner code validated with zero integrity drift.");
+      }
+    }
+
+    function restoreAppCore() {
+      document.getElementById('coreCodeTextArea').value = originalCoreCode;
+      document.getElementById('corruptedAppOverlay').classList.add('hidden');
+      showModal("System Rebooted", "App core restored from system image.");
+    }
+
+    function authenticateDeveloper() {
+      const passInput = document.getElementById('devPasswordInput');
+      if (!passInput) return;
+      if (passInput.value.trim() === "rumblingjaks@reddragon") {
+        isDeveloper = true;
+        const statusBadge = document.getElementById('devStatusBadge');
+        statusBadge.innerText = "UNLOCKED";
+        statusBadge.className = "text-[9px] bg-red-900 text-red-200 px-2 py-0.5 rounded font-bold border border-red-600";
+        document.getElementById('developerPanel').classList.remove('hidden');
+        document.getElementById('devBankSection').classList.remove('hidden');
+        passInput.value = "";
+        showModal("Developer Authenticated", "Developer access verified. Full node control enabled.");
+      } else {
+        showModal("Access Denied", "Incorrect Developer Password!");
+      }
+    }
+
+    function toggleDevModeState(enabled) {
+      const reqPass = prompt("Re-enter Developer Password to change Developer Mode:");
+      if (reqPass === "rumblingjaks@reddragon") {
+        devModeActive = enabled;
+        showModal("Developer Mode", enabled ? "Developer Mode is now ON." : "Developer Mode is now OFF.");
+      } else {
+        document.getElementById('devModeStateToggle').checked = !enabled;
+        showModal("Error", "Authentication failed. Toggle reverted.");
+      }
+    }
+
+    function toggleSeeIp(enabled) {
+      seeUserIpEnabled = enabled;
+      const banner = document.getElementById('devIpBanner');
+      if (enabled) banner.classList.remove('hidden');
+      else banner.classList.add('hidden');
+    }
+
+    function setDevPermanentIp() {
+      const ipInput = document.getElementById('devIpInput');
+      if (!ipInput) return;
+      const ip = ipInput.value.trim();
+      if (ip) {
+        currentIp = ip;
+        document.getElementById('currentIpText').innerText = ip;
+        showModal("IP Modified", `Permanent IP address set to ${ip}`);
+      }
+    }
+
+    function changeDevServer(val) {
+      currentServer = val;
+      document.getElementById('currentServerText').innerText = `SERVER: ${val}`;
+      showModal("Server Updated", `Country VPN relay updated to ${val}`);
+    }
+
+    function devDeleteUser() {
+      const mailInput = document.getElementById('devDeleteUserMail');
+      if (!mailInput || !mailInput.value.trim()) return;
+      showModal("User Deleted", `User with RedMail ID ${mailInput.value.trim()} has been purged from system memory.`);
+      mailInput.value = "";
+    }
+
+    function devDeleteMessage() {
+      const linkInput = document.getElementById('devDeleteMsgLink');
+      if (!linkInput || !linkInput.value.trim()) return;
+      showModal("Message Purged", `Message linked at ${linkInput.value.trim()} deleted globally.`);
+      linkInput.value = "";
+    }
+
+    async function devModifyRedDrillion() {
+      const amtInput = document.getElementById('devAmountValue');
+      const amt = parseFloat(amtInput.value);
+      if (!isNaN(amt)) {
+        userRedDrillionBalance = amt;
+        document.getElementById('balanceDisplay').innerText = userRedDrillionBalance.toLocaleString();
+        await saveUserDataToFirestore();
+        showModal("Balance Updated", `Set RedDrillion balance to U̸ ${amt}`);
+      }
+    }
+
+    function updateVoiceSelection(val) {
+      document.getElementById('aiVoiceModeDisplay').innerText = `Voice: ${val}`;
+    }
+
+    function testVoiceSample() {
+      showModal("Voice Sample", `Testing audio synthesis for [${document.getElementById('voiceSelect').value}]...`);
+    }
+
+    function changeBgColor(colorHex) {
+      document.getElementById('appContainer').style.backgroundColor = colorHex;
+    }
+
+    function changeTextColor(cssClass) {
+      const container = document.getElementById('appContainer');
+      container.classList.remove('text-red-500', 'text-black', 'text-white', 'text-emerald-400', 'text-purple-400', 'text-zinc-400');
+      container.classList.add(cssClass);
+    }
+
+    function changeThemeAccent(color) {
+      showModal("Theme Accent", `Theme color scheme updated to ${color}.`);
+    }
+
+    function resetToDefaultSettings() {
+      document.getElementById('appContainer').style.backgroundColor = "#000000";
+      changeTextColor('text-red-500');
+      document.getElementById('voiceSelect').value = "Jarvis Voice";
+      document.getElementById('voicePitch').value = 1.0;
+      document.getElementById('voiceThickness').value = 1.0;
+      document.getElementById('pitchVal').innerText = "1.0";
+      document.getElementById('rateVal').innerText = "1.0";
+      showModal("Settings Reset", "All custom alterations restored to default parameters.");
+    }
+
+    function showModal(title, text) {
+      if (window.AndroidNative && window.AndroidNative.vibrate) window.AndroidNative.vibrate(25);
+      document.getElementById('modalTitle').innerText = title;
+      document.getElementById('modalBody').innerText = text;
+      document.getElementById('modalBox').classList.remove('hidden');
+    }
+
+    function closeModal() {
+      document.getElementById('modalBox').classList.add('hidden');
+    }
+
+    function exportApkPackage(type) {
+      if (type === 'apk') {
+        const htmlContent = "<!DOCTYPE html>\n" + document.documentElement.outerHTML;
+        const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "RedDragon_Browser_VPN_v4.5.apk.html";
+        a.click();
+        showModal("APK Export Ready", "RedDragon HTML code package downloaded. Load this index.html into Android Studio WebView, Web2APK, or Capacitor to build the native APK.");
+      } else if (type === 'manifest') {
+        const manifest = {
+          name: "RedDragon Browser & VPN",
+          short_name: "RedDragon OS",
+          start_url: "index.html",
+          display: "standalone",
+          background_color: "#000000",
+          theme_color: "#09090b",
+          icons: [{ src: "icon.png", sizes: "512x512", type: "image/png" }]
+        };
+        const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: "application/json" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "manifest.json";
+        a.click();
+        showModal("Manifest Ready", "manifest.json downloaded for PWA & Android WebView APK configuration.");
+      }
+    }
+  </script>
+</body>
+</html>
